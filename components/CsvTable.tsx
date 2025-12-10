@@ -262,6 +262,11 @@ export default function CsvTable({
         return null;
       }
 
+      const sourceRect = columnRects[sourceIndex]?.rect;
+      if (sourceRect && clientX >= sourceRect.left && clientX <= sourceRect.right) {
+        return { columnIndex: sourceColumn, insertBefore: true };
+      }
+
       return null;
     },
     [measurementOrder]
