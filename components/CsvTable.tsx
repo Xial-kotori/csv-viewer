@@ -35,6 +35,7 @@ export default function CsvTable({
     startWidth: number;
   } | null>(null);
   const dragColumnRef = useRef<number | null>(null);
+  const previewHeaderRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
   const [draggingColumn, setDraggingColumn] = useState<number | null>(null);
   const [previewOrder, setPreviewOrder] = useState<number[] | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -189,46 +190,83 @@ export default function CsvTable({
     [columnStylesByIndex, orderedColumns]
   );
 
+  useEffect(() => {
+    if (!previewOrder) {
+      previewHeaderRefs.current.clear();
+    }
+  }, [previewOrder]);
+
   type ColumnSlot = {
     columnIndex: number;
     insertBefore: boolean;
   };
 
+  const measurementOrder = useMemo(() => {
+    const baseOrder = previewOrder ?? orderedColumns;
+    return baseOrder.filter((index) => !hiddenColumnSet?.has(index));
+  }, [hiddenColumnSet, orderedColumns, previewOrder]);
+
   const findColumnSlotByPointer = useCallback(
     (clientX: number): ColumnSlot | null => {
-      const visibleColumns = orderedColumns.filter((index) => !hiddenColumnSet?.has(index));
-      if (!visibleColumns.length) {
+      if (!measurementOrder.length) {
         return null;
       }
 
-      let lastColumn: number | null = null;
+      const columnRects = measurementOrder
+        .map((columnIndex) => {
+          const element = previewOrder ? previewHeaderRefs.current.get(columnIndex) : headerRefs.current[columnIndex];
+          if (!element) {
+            return null;
+          }
+          return { columnIndex, rect: element.getBoundingClientRect() };
+        })
+        .filter((entry): entry is { columnIndex: number; rect: DOMRect } => Boolean(entry));
 
-      for (const columnIndex of visibleColumns) {
-        const cell = headerRefs.current[columnIndex];
-        if (!cell) {
-          continue;
-        }
-        const rect = cell.getBoundingClientRect();
-        const midpoint = rect.left + rect.width / 2;
-
-        if (clientX < rect.left) {
-          return { columnIndex, insertBefore: true };
-        }
-
-        if (clientX >= rect.left && clientX <= rect.right) {
-          return { columnIndex, insertBefore: clientX <= midpoint };
-        }
-
-        lastColumn = columnIndex;
+      if (!columnRects.length) {
+        return null;
       }
 
-      if (lastColumn != null) {
-        return { columnIndex: lastColumn, insertBefore: false };
+      const sourceColumn = dragColumnRef.current;
+      if (sourceColumn == null) {
+        return null;
+      }
+      const sourceIndex = columnRects.findIndex((entry) => entry.columnIndex === sourceColumn);
+      if (sourceIndex === -1) {
+        return null;
       }
 
+      const sourceRect = columnRects[sourceIndex]?.rect;
+      if (!sourceRect) {
+        return null;
+      }
+
+      if (clientX > sourceRect.right) {
+        for (let index = 0; index < columnRects.length; index += 1) {
+          const entry = columnRects[index];
+          const { rect } = entry;
+          if (rect.left <= clientX && clientX < rect.right) {
+            return { columnIndex: entry.columnIndex, insertBefore: false };
+          }
+        }
+        const last = columnRects[columnRects.length - 1];
+        return { columnIndex: last.columnIndex, insertBefore: true };
+      }
+
+      if (clientX < sourceRect.left) {
+        for (let index = sourceIndex - 1; index >= 0; index -= 1) {
+          const entry = columnRects[index];
+          const { rect } = entry;
+          if (rect.left < clientX && clientX <= rect.right) {
+            return { columnIndex: entry.columnIndex, insertBefore: true };
+          }
+        }
+        const first = columnRects[0];
+        return { columnIndex: first.columnIndex, insertBefore: false };
+      }
+      console.log("findColumnSlotByPointer: no slot found", clientX, sourceRect);
       return null;
     },
-    [hiddenColumnSet, orderedColumns]
+    [measurementOrder, previewOrder]
   );
 
   const updatePreviewForSlot = useCallback(
@@ -441,6 +479,13 @@ export default function CsvTable({
               key={`preview-${columnIndex}`}
               className={`column-drag-preview-item${draggingColumn === columnIndex ? " is-active" : ""}`}
               style={slotStyles[positionIndex]}
+              ref={(element) => {
+                if (element) {
+                  previewHeaderRefs.current.set(columnIndex, element);
+                } else {
+                  previewHeaderRefs.current.delete(columnIndex);
+                }
+              }}
             >
               <CellContent
                 value={headerRow[columnIndex] ?? ""}

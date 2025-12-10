@@ -153,7 +153,14 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
   }, [loadServerDirectory]);
 
   const handleCsvText = useCallback(
-    (text: string, label?: string, virtualPath?: string | null, source: TableSource = "local") => {
+    (
+      text: string,
+      label?: string,
+      virtualPath?: string | null,
+      source: TableSource = "local",
+      options: { preserveLayout?: boolean } = {}
+    ) => {
+      const { preserveLayout = false } = options;
       try {
         const rows = parseCsv(text);
         if (!rows.length || rows.every((row) => row.every((cell) => !cell.trim()))) {
@@ -170,9 +177,42 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
         setTableLabel(label ?? "CSV 预览");
         setTableVirtualPath(virtualPath ?? null);
         setTableSource(source);
-        setColumnVisibility(Array.from({ length: maxColumns }, () => true));
-        setColumnOrder(Array.from({ length: maxColumns }, (_, index) => index));
-        setTableLayoutVersion((prev) => prev + 1);
+        if (preserveLayout) {
+          setColumnVisibility((prev) => {
+            if (!prev.length) {
+              return Array.from({ length: maxColumns }, () => true);
+            }
+            if (prev.length === maxColumns) {
+              return prev;
+            }
+            if (prev.length > maxColumns) {
+              return prev.slice(0, maxColumns);
+            }
+            return [...prev, ...Array.from({ length: maxColumns - prev.length }, () => true)];
+          });
+          setColumnOrder((prev) => {
+            if (!prev.length) {
+              return Array.from({ length: maxColumns }, (_, index) => index);
+            }
+            const normalized = prev.filter((index) => index >= 0 && index < maxColumns);
+            const existing = new Set(normalized);
+            const missing: number[] = [];
+            for (let index = 0; index < maxColumns; index += 1) {
+              if (!existing.has(index)) {
+                missing.push(index);
+              }
+            }
+            const next = [...normalized, ...missing];
+            if (next.length === prev.length && next.every((value, index) => value === prev[index])) {
+              return prev;
+            }
+            return next;
+          });
+        } else {
+          setColumnVisibility(Array.from({ length: maxColumns }, () => true));
+          setColumnOrder(Array.from({ length: maxColumns }, (_, index) => index));
+          setTableLayoutVersion((prev) => prev + 1);
+        }
         setTableLoading(false);
         showStatus(`成功载入 ${rows.length} 行数据。`);
       } catch (error) {
@@ -189,7 +229,10 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
   );
 
   const loadServerCsv = useCallback(
-    async (virtualPath: string, { suppressStatus = false }: { suppressStatus?: boolean } = {}) => {
+    async (
+      virtualPath: string,
+      { suppressStatus = false, preserveLayout = false }: { suppressStatus?: boolean; preserveLayout?: boolean } = {}
+    ) => {
       const label = deriveLabelFromVirtualPath(virtualPath);
       setTableLabel(label);
       setTableVirtualPath(virtualPath);
@@ -204,7 +247,7 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
           throw new Error(`服务器返回 ${response.status}`);
         }
         const text = await response.text();
-        handleCsvText(text, label, virtualPath, "server");
+        handleCsvText(text, label, virtualPath, "server", { preserveLayout });
         if (!suppressStatus) {
           showStatus(`已加载 ${label}。`);
         }
@@ -403,15 +446,12 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
   const resolveServerAssetUrl = useCallback((raw: string) => resolveServerAssetPath(raw), []);
   const activeAssetResolver = tableSource === "server" ? resolveServerAssetUrl : undefined;
 
-  const handleResetTableView = useCallback(() => {
-    if (!tableRows) {
+  const handleRefreshTableData = useCallback(() => {
+    if (tableSource !== "server" || !tableVirtualPath) {
       return;
     }
-    const maxColumns = getMaxColumnCount(tableRows);
-    setColumnVisibility(Array.from({ length: maxColumns }, () => true));
-    setColumnOrder(Array.from({ length: maxColumns }, (_, index) => index));
-    setTableLayoutVersion((prev) => prev + 1);
-  }, [tableRows]);
+    void loadServerCsv(tableVirtualPath, { preserveLayout: true });
+  }, [loadServerCsv, tableSource, tableVirtualPath]);
 
   const openPreview = useCallback((src: string, caption?: string) => {
     setPreview({
@@ -715,10 +755,10 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
           <button
             type="button"
             className="table-reset-btn"
-            onClick={handleResetTableView}
-            disabled={!tableRows}
+            onClick={handleRefreshTableData}
+            disabled={tableSource !== "server" || !tableVirtualPath}
           >
-            重置
+            刷新
           </button>
         </div>
         <div className="table-section-content">
