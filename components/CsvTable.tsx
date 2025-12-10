@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CsvRow } from "@/lib/csv";
 
 const MIN_COLUMN_WIDTH = 48;
@@ -35,6 +35,9 @@ export default function CsvTable({
     startWidth: number;
   } | null>(null);
   const dragColumnRef = useRef<number | null>(null);
+  const [draggingColumn, setDraggingColumn] = useState<number | null>(null);
+  const [previewOrder, setPreviewOrder] = useState<number[] | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   const handleResizePointerDown = useCallback(
     (index: number, event: React.PointerEvent<HTMLSpanElement>) => {
@@ -123,7 +126,6 @@ export default function CsvTable({
 
   const [headerRow, ...bodyRows] = hasRows ? rows : [];
   const maxColumns = hasRows ? Math.max(getMaxColumns(rows), 1) : 0;
-
   const hiddenColumnSet = hiddenColumns ?? null;
 
   const visibleColumnCount = useMemo(() => {
@@ -175,13 +177,122 @@ export default function CsvTable({
     return Array.from({ length: maxColumns }, (_, index) => index);
   }, [columnOrder, maxColumns]);
 
+  const columnStylesByIndex = useMemo(() => {
+    if (!maxColumns) {
+      return [] as Array<ReturnType<typeof getColumnStyle>>;
+    }
+    return Array.from({ length: maxColumns }, (_, index) => getColumnStyle(index));
+  }, [getColumnStyle, maxColumns]);
+
+  const slotStyles = useMemo(
+    () => orderedColumns.map((columnIndex) => columnStylesByIndex[columnIndex]),
+    [columnStylesByIndex, orderedColumns]
+  );
+
+  type ColumnSlot = {
+    columnIndex: number;
+    insertBefore: boolean;
+  };
+
+  const findColumnSlotByPointer = useCallback(
+    (clientX: number): ColumnSlot | null => {
+      const visibleColumns = orderedColumns.filter((index) => !hiddenColumnSet?.has(index));
+      if (!visibleColumns.length) {
+        return null;
+      }
+
+      let lastColumn: number | null = null;
+
+      for (const columnIndex of visibleColumns) {
+        const cell = headerRefs.current[columnIndex];
+        if (!cell) {
+          continue;
+        }
+        const rect = cell.getBoundingClientRect();
+        const midpoint = rect.left + rect.width / 2;
+
+        if (clientX < rect.left) {
+          return { columnIndex, insertBefore: true };
+        }
+
+        if (clientX >= rect.left && clientX <= rect.right) {
+          return { columnIndex, insertBefore: clientX <= midpoint };
+        }
+
+        lastColumn = columnIndex;
+      }
+
+      if (lastColumn != null) {
+        return { columnIndex: lastColumn, insertBefore: false };
+      }
+
+      return null;
+    },
+    [hiddenColumnSet, orderedColumns]
+  );
+
+  const updatePreviewForSlot = useCallback(
+    (slot: ColumnSlot | null) => {
+      const sourceColumn = dragColumnRef.current;
+      if (sourceColumn == null || !slot) {
+        return;
+      }
+      const baseOrder = orderedColumns;
+      const fromIndex = baseOrder.indexOf(sourceColumn);
+      const targetIndex = baseOrder.indexOf(slot.columnIndex);
+      if (fromIndex === -1 || targetIndex === -1) {
+        return;
+      }
+      let insertIndex = slot.insertBefore ? targetIndex : targetIndex + 1;
+      if (insertIndex > baseOrder.length) {
+        insertIndex = baseOrder.length;
+      }
+      if (fromIndex < insertIndex) {
+        insertIndex -= 1;
+      }
+      if (insertIndex === fromIndex) {
+        setPreviewOrder(baseOrder);
+        return;
+      }
+      const nextOrder = [...baseOrder];
+      nextOrder.splice(fromIndex, 1);
+      nextOrder.splice(insertIndex, 0, sourceColumn);
+      setPreviewOrder(nextOrder);
+    },
+    [orderedColumns]
+  );
+
+  useLayoutEffect(() => {
+    const firstVisible = orderedColumns.find((index) => !hiddenColumnSet?.has(index));
+    if (firstVisible == null) {
+      setHeaderHeight(0);
+      return;
+    }
+    const cell = headerRefs.current[firstVisible];
+    if (!cell) {
+      setHeaderHeight(0);
+      return;
+    }
+    const updateHeight = () => {
+      setHeaderHeight(cell.getBoundingClientRect().height);
+    };
+    updateHeight();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => updateHeight());
+      observer.observe(cell);
+      return () => observer.disconnect();
+    }
+    return () => {
+      /* no-op */
+    };
+  }, [hiddenColumnSet, orderedColumns]);
+
   const reorderColumns = useCallback(
     (targetColumn: number) => {
       if (!onReorderColumns) {
         return;
       }
       const sourceColumn = dragColumnRef.current;
-      dragColumnRef.current = null;
       if (sourceColumn == null || sourceColumn === targetColumn) {
         return;
       }
@@ -192,32 +303,73 @@ export default function CsvTable({
       }
       const nextOrder = [...orderedColumns];
       nextOrder.splice(fromIndex, 1);
-      nextOrder.splice(toIndex, 0, sourceColumn);
+      const adjustedIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+      nextOrder.splice(adjustedIndex, 0, sourceColumn);
       onReorderColumns(nextOrder);
     },
     [onReorderColumns, orderedColumns]
   );
 
-  const handleHeaderDragStart = useCallback((columnIndex: number, event: React.DragEvent<HTMLTableCellElement>) => {
-    dragColumnRef.current = columnIndex;
-    event.dataTransfer?.setData("text/plain", columnIndex.toString());
-    event.dataTransfer?.setDragImage?.(event.currentTarget, 0, 0);
-  }, []);
+  const handleHeaderDragStart = useCallback(
+    (columnIndex: number, event: React.DragEvent<HTMLTableCellElement>) => {
+      dragColumnRef.current = columnIndex;
+      setDraggingColumn(columnIndex);
+      setPreviewOrder(orderedColumns);
+      event.dataTransfer?.setData("text/plain", columnIndex.toString());
+      event.dataTransfer?.setDragImage?.(event.currentTarget, 0, 0);
+      event.dataTransfer.effectAllowed = "move";
+    },
+    [orderedColumns]
+  );
 
-  const handleHeaderDragOver = useCallback((event: React.DragEvent<HTMLTableCellElement>) => {
-    event.preventDefault();
-  }, []);
+  const handleHeaderDragEnter = useCallback(
+    (columnIndex: number, event: React.DragEvent<HTMLTableCellElement>) => {
+      if (!onReorderColumns) {
+        return;
+      }
+      event.preventDefault();
+      const slot = findColumnSlotByPointer(event.clientX) ?? { columnIndex, insertBefore: true };
+      updatePreviewForSlot(slot);
+    },
+    [findColumnSlotByPointer, onReorderColumns, updatePreviewForSlot]
+  );
+
+  const handleHeaderDragOver = useCallback(
+    (event: React.DragEvent<HTMLTableCellElement>) => {
+      if (!onReorderColumns) {
+        return;
+      }
+      event.preventDefault();
+      const slot = findColumnSlotByPointer(event.clientX);
+      if (slot) {
+        updatePreviewForSlot(slot);
+      }
+    },
+    [findColumnSlotByPointer, onReorderColumns, updatePreviewForSlot]
+  );
 
   const handleHeaderDrop = useCallback(
     (columnIndex: number, event: React.DragEvent<HTMLTableCellElement>) => {
+      if (!onReorderColumns) {
+        return;
+      }
       event.preventDefault();
-      reorderColumns(columnIndex);
+      if (previewOrder && previewOrder.length === orderedColumns.length) {
+        onReorderColumns(previewOrder);
+      } else {
+        reorderColumns(columnIndex);
+      }
+      dragColumnRef.current = null;
+      setDraggingColumn(null);
+      setPreviewOrder(null);
     },
-    [reorderColumns]
+    [onReorderColumns, orderedColumns.length, previewOrder, reorderColumns]
   );
 
   const handleHeaderDragEnd = useCallback(() => {
     dragColumnRef.current = null;
+    setDraggingColumn(null);
+    setPreviewOrder(null);
   }, []);
 
   if (!hasRows) {
@@ -225,48 +377,50 @@ export default function CsvTable({
   }
 
   return (
-    <table ref={tableRef}>
-      {headerRow && headerRow.length ? (
-        <thead>
-          <tr>
-            {orderedColumns.map((columnIndex) =>
-              hiddenColumnSet?.has(columnIndex) ? null : (
-                <th
-                  key={`head-${columnIndex}`}
-                  ref={(element) => {
-                    headerRefs.current[columnIndex] = element;
-                  }}
-                  style={getColumnStyle(columnIndex)}
-                  className="resizable-column"
-                  draggable={Boolean(onReorderColumns)}
-                  onDragStart={(event) => handleHeaderDragStart(columnIndex, event)}
-                  onDragOver={handleHeaderDragOver}
-                  onDrop={(event) => handleHeaderDrop(columnIndex, event)}
-                  onDragEnd={handleHeaderDragEnd}
-                >
-                  <CellContent
-                    value={headerRow[columnIndex] ?? ""}
-                    onImageClick={onImageClick}
-                    resolveAssetUrl={resolveAssetUrl}
-                  />
-                  <span
-                    className="column-resize-handle"
-                    role="separator"
-                    aria-orientation="vertical"
-                    onPointerDown={(event) => handleResizePointerDown(columnIndex, event)}
-                  />
-                </th>
-              )
-            )}
-          </tr>
-        </thead>
-      ) : null}
-      <tbody>
+    <div className={`csv-table-container${previewOrder ? " is-drag-preview" : ""}`}>
+      <table ref={tableRef}>
+        {headerRow && headerRow.length ? (
+          <thead>
+            <tr>
+              {orderedColumns.map((columnIndex) =>
+                hiddenColumnSet?.has(columnIndex) ? null : (
+                  <th
+                    key={`head-${columnIndex}`}
+                    ref={(element) => {
+                      headerRefs.current[columnIndex] = element;
+                    }}
+                    style={columnStylesByIndex[columnIndex]}
+                    className={`resizable-column${draggingColumn === columnIndex ? " is-dragging" : ""}`}
+                    draggable={Boolean(onReorderColumns)}
+                    onDragStart={(event) => handleHeaderDragStart(columnIndex, event)}
+                    onDragEnter={(event) => handleHeaderDragEnter(columnIndex, event)}
+                    onDragOver={handleHeaderDragOver}
+                    onDrop={(event) => handleHeaderDrop(columnIndex, event)}
+                    onDragEnd={handleHeaderDragEnd}
+                  >
+                    <CellContent
+                      value={headerRow[columnIndex] ?? ""}
+                      onImageClick={onImageClick}
+                      resolveAssetUrl={resolveAssetUrl}
+                    />
+                    <span
+                      className="column-resize-handle"
+                      role="separator"
+                      aria-orientation="vertical"
+                      onPointerDown={(event) => handleResizePointerDown(columnIndex, event)}
+                    />
+                  </th>
+                )
+              )}
+            </tr>
+          </thead>
+        ) : null}
+        <tbody>
         {bodyRows.map((row, rowIndex) => (
           <tr key={`row-${rowIndex}`}>
             {orderedColumns.map((columnIndex) =>
               hiddenColumnSet?.has(columnIndex) ? null : (
-                <td key={`cell-${rowIndex}-${columnIndex}`} style={getColumnStyle(columnIndex)}>
+                <td key={`cell-${rowIndex}-${columnIndex}`} style={columnStylesByIndex[columnIndex]}>
                   <CellContent
                     value={row[columnIndex] ?? ""}
                     onImageClick={onImageClick}
@@ -279,6 +433,26 @@ export default function CsvTable({
         ))}
       </tbody>
     </table>
+    {previewOrder ? (
+      <div className="column-drag-preview" style={{ height: headerHeight || undefined }} aria-hidden="true">
+        {previewOrder.map((columnIndex, positionIndex) =>
+          hiddenColumnSet?.has(columnIndex) ? null : (
+            <div
+              key={`preview-${columnIndex}`}
+              className={`column-drag-preview-item${draggingColumn === columnIndex ? " is-active" : ""}`}
+              style={slotStyles[positionIndex]}
+            >
+              <CellContent
+                value={headerRow[columnIndex] ?? ""}
+                onImageClick={onImageClick}
+                resolveAssetUrl={resolveAssetUrl}
+              />
+            </div>
+          )
+        )}
+      </div>
+    ) : null}
+  </div>
   );
 }
 

@@ -89,6 +89,7 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [columnVisibility, setColumnVisibility] = useState<boolean[]>([]);
   const [columnOrder, setColumnOrder] = useState<number[]>([]);
+  const [tableLayoutVersion, setTableLayoutVersion] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [preview, setPreview] = useState<PreviewState>(INITIAL_PREVIEW_STATE);
   const [isDraggingPreview, setIsDraggingPreview] = useState(false);
@@ -171,6 +172,7 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
         setTableSource(source);
         setColumnVisibility(Array.from({ length: maxColumns }, () => true));
         setColumnOrder(Array.from({ length: maxColumns }, (_, index) => index));
+        setTableLayoutVersion((prev) => prev + 1);
         setTableLoading(false);
         showStatus(`成功载入 ${rows.length} 行数据。`);
       } catch (error) {
@@ -400,6 +402,16 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
 
   const resolveServerAssetUrl = useCallback((raw: string) => resolveServerAssetPath(raw), []);
   const activeAssetResolver = tableSource === "server" ? resolveServerAssetUrl : undefined;
+
+  const handleResetTableView = useCallback(() => {
+    if (!tableRows) {
+      return;
+    }
+    const maxColumns = getMaxColumnCount(tableRows);
+    setColumnVisibility(Array.from({ length: maxColumns }, () => true));
+    setColumnOrder(Array.from({ length: maxColumns }, (_, index) => index));
+    setTableLayoutVersion((prev) => prev + 1);
+  }, [tableRows]);
 
   const openPreview = useCallback((src: string, caption?: string) => {
     setPreview({
@@ -700,6 +712,14 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
               </a>
             ) : null}
           </div>
+          <button
+            type="button"
+            className="table-reset-btn"
+            onClick={handleResetTableView}
+            disabled={!tableRows}
+          >
+            重置
+          </button>
         </div>
         <div className="table-section-content">
           {tableLoading ? (
@@ -732,6 +752,7 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
               ) : null}
               <div className="table-wrapper">
                 <CsvTable
+                  key={tableLayoutVersion}
                   rows={tableRows}
                   onImageClick={openPreview}
                   resolveAssetUrl={activeAssetResolver}
