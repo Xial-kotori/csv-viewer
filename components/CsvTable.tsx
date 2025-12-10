@@ -195,6 +195,11 @@ export default function CsvTable({
     [hiddenColumnSet, orderedColumns]
   );
 
+  const visibleSlotStyles = useMemo(
+    () => measurementOrder.map((columnIndex) => columnStylesByIndex[columnIndex]),
+    [columnStylesByIndex, measurementOrder]
+  );
+
   const findColumnSlotByPointer = useCallback(
     (clientX: number): ColumnSlot | null => {
       if (!measurementOrder.length) {
@@ -482,21 +487,29 @@ export default function CsvTable({
     </table>
     {previewOrder ? (
       <div className="column-drag-preview" style={{ height: headerHeight || undefined }} aria-hidden="true">
-        {previewOrder.map((columnIndex) =>
-          hiddenColumnSet?.has(columnIndex) ? null : (
-            <div
-              key={`preview-${columnIndex}`}
-              className={`column-drag-preview-item${draggingColumn === columnIndex ? " is-active" : ""}`}
-              style={columnStylesByIndex[columnIndex]}
-            >
-              <CellContent
-                value={headerRow[columnIndex] ?? ""}
-                onImageClick={onImageClick}
-                resolveAssetUrl={resolveAssetUrl}
-              />
-            </div>
-          )
-        )}
+        {(() => {
+          let slotIndex = -1;
+          return previewOrder.map((columnIndex) => {
+            if (hiddenColumnSet?.has(columnIndex)) {
+              return null;
+            }
+            slotIndex += 1;
+            const slotStyle = visibleSlotStyles[slotIndex];
+            return (
+              <div
+                key={`preview-${columnIndex}`}
+                className={`column-drag-preview-item${draggingColumn === columnIndex ? " is-active" : ""}`}
+                style={slotStyle}
+              >
+                <CellContent
+                  value={headerRow[columnIndex] ?? ""}
+                  onImageClick={onImageClick}
+                  resolveAssetUrl={resolveAssetUrl}
+                />
+              </div>
+            );
+          });
+        })()}
       </div>
     ) : null}
   </div>
