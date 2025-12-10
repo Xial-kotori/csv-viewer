@@ -185,11 +185,6 @@ export default function CsvTable({
     return Array.from({ length: maxColumns }, (_, index) => getColumnStyle(index));
   }, [getColumnStyle, maxColumns]);
 
-  const slotStyles = useMemo(
-    () => orderedColumns.map((columnIndex) => columnStylesByIndex[columnIndex]),
-    [columnStylesByIndex, orderedColumns]
-  );
-
   type ColumnSlot = {
     columnIndex: number;
     insertBefore: boolean;
@@ -482,12 +477,12 @@ export default function CsvTable({
     </table>
     {previewOrder ? (
       <div className="column-drag-preview" style={{ height: headerHeight || undefined }} aria-hidden="true">
-        {previewOrder.map((columnIndex, positionIndex) =>
+        {previewOrder.map((columnIndex) =>
           hiddenColumnSet?.has(columnIndex) ? null : (
             <div
               key={`preview-${columnIndex}`}
               className={`column-drag-preview-item${draggingColumn === columnIndex ? " is-active" : ""}`}
-              style={slotStyles[positionIndex]}
+              style={columnStylesByIndex[columnIndex]}
             >
               <CellContent
                 value={headerRow[columnIndex] ?? ""}
