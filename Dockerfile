@@ -15,13 +15,14 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0
 
-# Install only prod deps for the runtime image
+# Reuse previously installed deps and strip dev-only packages
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY --from=deps /app/node_modules ./node_modules
+RUN npm prune --omit=dev
 
 # Copy Next.js build output and public assets
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 
 EXPOSE 3000
-CMD ["sh", "-c", "PORT=${PORT:-3000} HOST=${HOST:-0.0.0.0} npm run start"]
+CMD ["npm", "run", "start"]
