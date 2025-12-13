@@ -54,10 +54,20 @@ const INITIAL_PREVIEW_STATE: PreviewState = {
   translateY: 0,
 };
 
-export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPath: string | null }) {
+export default function CsvViewerApp({
+  initialVirtualPath,
+  initialServerPath = null,
+}: {
+  initialVirtualPath: string | null;
+  initialServerPath?: string | null;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const normalizedVirtualPath = pathname === "/" ? null : decodeURIComponent(pathname);
+  const initialServerDir = useMemo(
+    () => normalizeDirectoryPath(initialServerPath ?? SERVER_ROOT_DIR),
+    [initialServerPath]
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewWrapperRef = useRef<HTMLDivElement | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
@@ -80,7 +90,7 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
 
   const [serverEntries, setServerEntries] = useState<DirectoryEntry[]>([]);
   const [serverLoading, setServerLoading] = useState(true);
-  const [serverPath, setServerPath] = useState(() => normalizeDirectoryPath(SERVER_ROOT_DIR));
+  const [serverPath, setServerPath] = useState(initialServerDir);
   const [tableRows, setTableRows] = useState<CsvRow[] | null>(null);
   const [tableLabel, setTableLabel] = useState("CSV 预览");
   const [tableVirtualPath, setTableVirtualPath] = useState<string | null>(initialVirtualPath);
@@ -122,8 +132,18 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
     }
   }, [tableVirtualPath]);
 
+  const updateExplorerUrl = useCallback((normalizedPath: string) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("dir", normalizedPath);
+    url.pathname = "/";
+    window.history.replaceState(null, "", url.toString());
+  }, []);
+
   const loadServerDirectory = useCallback(
-    async (path: string, { silent = false }: { silent?: boolean } = {}) => {
+    async (path: string, { silent = false, skipUrl = false }: { silent?: boolean; skipUrl?: boolean } = {}) => {
       const normalized = normalizeDirectoryPath(path);
       setServerLoading(true);
       try {
@@ -135,6 +155,9 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
         const data = (await response.json()) as { entries: DirectoryEntry[] };
         setServerEntries(data.entries ?? []);
         setServerPath(normalized);
+        if (!skipUrl) {
+          updateExplorerUrl(normalized);
+        }
         if (!silent) {
           showStatus(`已打开 ${normalized}`);
         }
@@ -145,12 +168,12 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
         setServerLoading(false);
       }
     },
-    [showStatus]
+    [showStatus, updateExplorerUrl]
   );
 
   useEffect(() => {
-    void loadServerDirectory(SERVER_ROOT_DIR, { silent: true });
-  }, [loadServerDirectory]);
+    void loadServerDirectory(initialServerDir, { silent: true, skipUrl: true });
+  }, [initialServerDir, loadServerDirectory]);
 
   const handleCsvText = useCallback(
     (
@@ -370,8 +393,9 @@ export default function CsvViewerApp({ initialVirtualPath }: { initialVirtualPat
     setTableSource(null);
     setTableLoading(false);
     showStatus("已返回服务器浏览");
-    router.push("/");
-  }, [router, showStatus]);
+    const search = new URLSearchParams({ dir: serverPath }).toString();
+    router.replace(`/?${search}`);
+  }, [router, serverPath, showStatus]);
 
   const sortedEntries = useMemo(() => sortDirectoryEntries(serverEntries), [serverEntries]);
   const filteredEntries = useMemo(

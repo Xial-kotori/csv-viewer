@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --bg: #f8f9fb;
   --border: #d8dfe5;
@@ -102,6 +102,8 @@ button:active,
 
 .table-wrapper {
   overflow: auto;
+  max-height: 70vh;
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: white;
@@ -188,7 +190,8 @@ button:active,
   flex-wrap: wrap;
   gap: 8px 16px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 0;
+  margin-left: 12px;
   font-size: 14px;
   color: #4d5560;
 }
@@ -353,12 +356,26 @@ table {
   border-collapse: collapse;
 }
 
+.csv-table-container table {
+  border-collapse: separate;
+  border-spacing: 0;
+  position: relative;
+}
+
 .csv-table-container {
   position: relative;
 }
 
 .csv-table-container.is-drag-preview thead th {
   opacity: 0;
+}
+
+.csv-table-container thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f5f6f8;
+  box-shadow: inset 0 -1px 0 #eef1f4;
 }
 
 thead tr {
@@ -585,6 +602,10 @@ body.table-view-active .container {
   padding: 0 0 40px;
 }
 
+body.table-view-active {
+  overflow: hidden;
+}
+
 body.table-view-active header,
 body.table-view-active .controls,
 body.table-view-active .drop-zone,
@@ -599,6 +620,9 @@ body.table-view-active .table-section {
   border-radius: 0;
   margin-top: 0;
   min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 body.table-view-active .table-view-header {
@@ -613,12 +637,21 @@ body.table-view-active .table-view-meta span {
 }
 
 body.table-view-active .table-section-content {
-  padding: 24px 5vw 40px;
-  min-height: calc(100vh - 72px);
+  padding: 10px 30px 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
 }
 
 body.table-view-active .table-section-content .table-wrapper {
   border: 1px solid rgba(148, 163, 184, 0.25);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
 }
 
 @media (max-width: 600px) {

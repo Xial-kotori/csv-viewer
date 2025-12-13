@@ -6,6 +6,7 @@ type PageProps = {
   };
   searchParams: {
     virtual?: string;
+    dir?: string;
   };
 };
 
@@ -18,8 +19,9 @@ export default function CsvViewerPage({ params, searchParams }: PageProps) {
     : null;
   const fromSearch = normalizeVirtual(searchParams.virtual);
   const virtualPath = fromSearch ?? fromParams;
+  const initialDirectory = searchParams.dir ?? null;
 
-  return <CsvViewerApp initialVirtualPath={virtualPath} />;
+  return <CsvViewerApp initialVirtualPath={virtualPath} initialServerPath={initialDirectory} />;
 }
 
 function normalizeVirtual(value?: string): string | null {

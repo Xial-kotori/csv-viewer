@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -21,21 +22,79 @@ export async function GET(request: Request) {
 
   try {
     const dirents = await readdir(resolved, { withFileTypes: true });
-    const entries = dirents
-      .filter((entry) => !entry.name.startsWith("."))
-      .map((entry) => {
-        const entryPath = path.posix.join(normalized, entry.name) + (entry.isDirectory() ? "/" : "");
-        return {
-          name: entry.name,
-          path: entryPath,
-          isDirectory: entry.isDirectory(),
-        };
-      });
+    const entries = await filterEntriesWithCsv(dirents, resolved, normalized);
 
     return NextResponse.json({ entries, path: normalized });
   } catch (error) {
     return NextResponse.json({ error: "无法访问目录" }, { status: 404 });
   }
+}
+
+async function filterEntriesWithCsv(dirents: Dirent[], parentFsPath: string, normalizedPath: string) {
+  const entries: Array<{ name: string; path: string; isDirectory: boolean }> = [];
+  for (const entry of dirents) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    const entryFsPath = path.join(parentFsPath, entry.name);
+    if (entry.isFile()) {
+      if (!isCsvFile(entry.name)) {
+        continue;
+      }
+      entries.push(toResponseEntry(entry, normalizedPath));
+      continue;
+    }
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const containsCsv = await hasCsvWithin(entryFsPath);
+    if (!containsCsv) {
+      continue;
+    }
+    entries.push(toResponseEntry(entry, normalizedPath));
+  }
+  return entries;
+}
+
+async function hasCsvWithin(directoryPath: string): Promise<boolean> {
+  const queue: string[] = [directoryPath];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+    let dirents: Dirent[];
+    try {
+      dirents = await readdir(current, { withFileTypes: true });
+    } catch (error) {
+      continue;
+    }
+    for (const entry of dirents) {
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+      if (entry.isFile() && isCsvFile(entry.name)) {
+        return true;
+      }
+      if (entry.isDirectory()) {
+        queue.push(path.join(current, entry.name));
+      }
+    }
+  }
+  return false;
+}
+
+function toResponseEntry(entry: Dirent, normalizedPath: string) {
+  const entryPath = path.posix.join(normalizedPath, entry.name) + (entry.isDirectory() ? "/" : "");
+  return {
+    name: entry.name,
+    path: entryPath,
+    isDirectory: entry.isDirectory(),
+  };
+}
+
+function isCsvFile(name: string): boolean {
+  return name.toLowerCase().endsWith(".csv");
 }
 
 function normalizeDirectoryPath(input: string): string {
