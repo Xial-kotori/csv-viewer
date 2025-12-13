@@ -33,3 +33,4 @@ Thumbs.db
 
 public/server-data/*
 !public/server-data/.gitkeep
+docker-compose.yml
