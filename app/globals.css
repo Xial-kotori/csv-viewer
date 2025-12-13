@@ -202,13 +202,34 @@ button:active,
   gap: 8px 16px;
 }
 
-.table-column-control-list label {
+.table-column-control-list .column-control-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
   color: #1b1f24;
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.table-column-control-list .column-control-item:hover {
+  border-color: rgba(31, 111, 235, 0.4);
+  background: #eef4ff;
+}
+
+.table-column-control-list .column-control-item.is-dragging {
+  opacity: 0.7;
+  cursor: grabbing;
+}
+
+.table-column-control-list .column-control-item.is-drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.15);
 }
 
 .table-column-control-list input {

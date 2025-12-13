@@ -103,6 +103,9 @@ export default function CsvViewerApp({
   const [dropActive, setDropActive] = useState(false);
   const [preview, setPreview] = useState<PreviewState>(INITIAL_PREVIEW_STATE);
   const [isDraggingPreview, setIsDraggingPreview] = useState(false);
+  const columnControlDragRef = useRef<number | null>(null);
+  const [columnControlDragOver, setColumnControlDragOver] = useState<number | null>(null);
+  const [columnControlDragging, setColumnControlDragging] = useState<number | null>(null);
 
   useEffect(() => {
     previewStateRef.current = preview;
@@ -422,6 +425,13 @@ export default function CsvViewerApp({
     [columnVisibility]
   );
 
+  const columnDisplayOrder = useMemo(() => {
+    if (columnOrder.length === columnVisibility.length && columnOrder.length) {
+      return columnOrder;
+    }
+    return columnVisibility.map((_, index) => index);
+  }, [columnOrder, columnVisibility]);
+
   const toggleColumnVisibility = useCallback(
     (index: number) => {
       setColumnVisibility((prev) => {
@@ -443,12 +453,58 @@ export default function CsvViewerApp({
     []
   );
 
-  const columnDisplayOrder = useMemo(() => {
-    if (columnOrder.length === columnVisibility.length && columnOrder.length) {
-      return columnOrder;
-    }
-    return columnVisibility.map((_, index) => index);
-  }, [columnOrder, columnVisibility]);
+  const handleColumnControlDragStart = useCallback(
+    (displayIndex: number, event: React.DragEvent<HTMLLabelElement>) => {
+      columnControlDragRef.current = displayIndex;
+      setColumnControlDragging(displayIndex);
+      setColumnControlDragOver(null);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(displayIndex));
+      }
+    },
+    []
+  );
+
+  const handleColumnControlDragOver = useCallback(
+    (displayIndex: number, event: React.DragEvent<HTMLLabelElement>) => {
+      event.preventDefault();
+      if (columnControlDragRef.current === null || columnControlDragRef.current === displayIndex) {
+        return;
+      }
+      setColumnControlDragOver(displayIndex);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    },
+    []
+  );
+
+  const handleColumnControlDrop = useCallback(
+    (displayIndex: number, event: React.DragEvent<HTMLLabelElement>) => {
+      event.preventDefault();
+      const fromIndex = columnControlDragRef.current;
+      if (fromIndex === null || fromIndex === displayIndex) {
+        setColumnControlDragOver(null);
+        setColumnControlDragging(null);
+        columnControlDragRef.current = null;
+        return;
+      }
+      const nextOrder = reorderArray(columnDisplayOrder, fromIndex, displayIndex);
+      setColumnOrder(nextOrder);
+      setTableLayoutVersion((prev) => prev + 1);
+      setColumnControlDragOver(null);
+      setColumnControlDragging(null);
+      columnControlDragRef.current = null;
+    },
+    [columnDisplayOrder]
+  );
+
+  const handleColumnControlDragEnd = useCallback(() => {
+    columnControlDragRef.current = null;
+    setColumnControlDragOver(null);
+    setColumnControlDragging(null);
+  }, []);
 
   const hiddenColumns = useMemo(() => {
     if (!columnVisibility.length) {
@@ -796,11 +852,24 @@ export default function CsvViewerApp({
                 <div className="table-column-controls">
                   <span>列显示：</span>
                   <div className="table-column-control-list" role="group" aria-label="列显示控制">
-                    {columnDisplayOrder.map((columnIndex) => {
+                    {columnDisplayOrder.map((columnIndex, displayIndex) => {
                       const visible = columnVisibility[columnIndex];
                       const label = columnLabelMap.get(columnIndex) ?? `列 ${columnIndex + 1}`;
+                      const isDragging = columnControlDragging === displayIndex;
+                      const isDragOver = columnControlDragOver === displayIndex;
                       return (
-                        <label key={`column-toggle-${columnIndex}`}>
+                        <label
+                          key={`column-toggle-${columnIndex}`}
+                          className={`column-control-item${isDragging ? " is-dragging" : ""}${
+                            isDragOver ? " is-drag-over" : ""
+                          }`}
+                          draggable
+                          onDragStart={(event) => handleColumnControlDragStart(displayIndex, event)}
+                          onDragOver={(event) => handleColumnControlDragOver(displayIndex, event)}
+                          onDrop={(event) => handleColumnControlDrop(displayIndex, event)}
+                          onDragEnd={handleColumnControlDragEnd}
+                          onDragLeave={() => setColumnControlDragOver(null)}
+                        >
                           <input
                             type="checkbox"
                             checked={visible}
@@ -952,6 +1021,16 @@ function deriveLabelFromVirtualPath(virtualPath: string): string {
 
 function getMaxColumnCount(rows: CsvRow[]): number {
   return rows.reduce((max, row) => Math.max(max, row.length), 0);
+}
+
+function reorderArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex === toIndex) {
+    return items;
+  }
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
 }
 
 function toServerPath(virtualPath: string): string {
