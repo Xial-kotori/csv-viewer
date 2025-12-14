@@ -17,14 +17,11 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0
 
-# Install only production deps
-COPY package.json yarn.lock ./
-RUN corepack enable && corepack prepare yarn@1.22.22 --activate
-RUN yarn install --frozen-lockfile --production
-
-# Copy Next.js build output and public assets
-COPY --from=builder /app/.next ./.next
+# Copy Next.js standalone output and public assets (no yarn install needed)
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+RUN mkdir -p public/server-data
 
 EXPOSE 3000
-CMD ["yarn", "start"]
+CMD ["node", "server.js"]
